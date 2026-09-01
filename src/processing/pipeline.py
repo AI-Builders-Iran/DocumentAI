@@ -1,6 +1,4 @@
 from langchain_core.documents import Document
-from .cleaners.base import BaseCleaner
-from langchain_core.documents import Document
 
 from .cleaners.base import BaseCleaner
 

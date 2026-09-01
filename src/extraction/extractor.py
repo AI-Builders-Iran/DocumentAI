@@ -1,15 +1,14 @@
-import os
 from typing import Type
 
-from google import genai
 from pydantic import BaseModel
 
-from src.schemas.common import GeneralDocument, DocumentType
+from src.extraction.prompts import PromptBuilder
+from src.extraction.providers.base import LLMProvider
+from src.schemas.common import DocumentType, GeneralDocument
 from src.schemas.contract import Contract
 from src.schemas.invoice import Invoice
-from src.extraction.prompts import PromptBuilder
 
-#------extract sructured information from document text using gemini-----------
+#-------------extract structured information from documents--------------------
 class DocumentExtractor:
 
     _SCHEMA_MAP: dict[DocumentType, Type[BaseModel]] = {
@@ -18,27 +17,20 @@ class DocumentExtractor:
         DocumentType.GENERAL: GeneralDocument,
     }
 
-    def __init__(
-        self,
-        api_key: str | None = None,
-        model_name: str = "gemini-2.5-flash",
-    ) -> None:
+    def __init__(self, providers: list[LLMProvider]) -> None:
         """
         initialize the document extractor.
-         args:
-            api_key: Gemini API key. if omitted, GEMINI_API_KEY is
-                read from environment variables.
-            model_name: Gemini model used for extraction.
-        raises:
-            valueError: if no API key is available.
+        args:
+            providers: Ordered list of LLM providers.
+                the first provider is the primary provider.
+                the following providers are used as fallbacks.
+        Raises:
+            valueError: if no provider is provided.
         """
-        self._api_key = api_key or os.getenv("GEMINI_API_KEY")
+        if not providers:
+            raise ValueError("At least one LLM provider is required.")
 
-        if not self._api_key:
-            raise ValueError("GEMINI_API_KEY is not set.")
-
-        self._client = genai.Client(api_key=self._api_key)
-        self._model_name = model_name
+        self._providers = providers
         self._prompt_builder = PromptBuilder()
 
     def extract(
@@ -49,12 +41,13 @@ class DocumentExtractor:
         """
         extract structured information from document text.
         args:
-            document_text: text extracted from the document.
-            document_type: type of the document.
+            document_text: Text extracted from the document.
+            document_type: Type of the document.
         returns:
-            A validated pydantic model containing extracted information.
+            a validated Pydantic model.
         raises:
-            valueError: if the document type is not supported.
+            valueerror: if the document type is unsupported.
+            runtimeerror: if all providers fail.
         """
         schema = self._get_schema(document_type)
 
@@ -63,16 +56,23 @@ class DocumentExtractor:
             document_type=document_type.value,
         )
 
-        response = self._client.models.generate_content(
-            model=self._model_name,
-            contents=prompt,
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": schema,
-            },
-        )
+        errors: list[str] = []
 
-        return schema.model_validate_json(response.text)
+        for provider in self._providers:
+            try:
+                return provider.extract(
+                    prompt=prompt,
+                    schema=schema,
+                )
+            except Exception as exc:
+                errors.append(
+                    f"{provider.__class__.__name__}: {exc}"
+                )
+
+        raise RuntimeError(
+            "All LLM providers failed. "
+            + " | ".join(errors)
+        )
 
     def _get_schema(
         self,
@@ -83,9 +83,10 @@ class DocumentExtractor:
         args:
             document_type: type of the document.
         returns:
-            the corresponding pydantic model class.
+            the corresponding Pydantic model class.
+
         raises:
-            valueError: if the document type is not supported.
+            valueError: if the document type is unsupported.
         """
         try:
             return self._SCHEMA_MAP[document_type]

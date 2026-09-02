@@ -6,6 +6,6 @@ __all__ = [
     "WhitespaceCleaner",
     "TextCleaner",
     "UnicodeCleaner",
-    DocumentProcessor,
+    "DocumentProcessor",
     "RecursiveChunker"
 ]

@@ -8,4 +8,5 @@ __all__ = [
     "UnicodeCleaner",
     DocumentProcessor,
     "RecursiveChunker"
+    "DocumentProcessor"
 ]
